@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { PrismaClient } from '@prisma/client/edge'
 import { withAccelerate } from '@prisma/extension-accelerate'
 import { sign, verify } from 'hono/jwt'
+import { createBlogInput, updateBlogInput } from '@gk-j/blog-common'
 
 
 export const blogRouter = new Hono<{
@@ -15,25 +16,44 @@ export const blogRouter = new Hono<{
 }>()
 
 blogRouter.use("/*",async(c,next)=>{
+    const token = c.req.header("Authorization") || ""
+    if (!token) {
+		c.status(401);
+		return c.json({ error: "unauthorized" });
+	}
     try {
-        const token = c.req.header("Authorization") || ""
         const user = await verify(token,c.env.JWT_SECRET)
-        //@ts-ignore
-        c.set("userId",user.id)
-        await next()
+        if(user){
+            //@ts-ignore
+            c.set("userId",user.id)
+            await next()
+        }else{
+            c.status(403)
+            return c.json({
+                message:"You are not Logged In"
+            })
+        }
+        
     } catch (error) {
         c.status(403)
-        return c.json({"error":"not authenticated please signin"})
+        return c.json({"error":"You are not Logged In"})
     }
 })
 
 
 blogRouter.post('/', async(c) => {
+    const body = await c.req.json()
+    const { success } = createBlogInput.safeParse(body)
+    if(!success){
+        c.status(411)
+        return c.json({
+            message:"Wrong Inputs"
+        })
+    }
+
     const prisma = new PrismaClient({
         datasourceUrl: c.env?.CONNECTIONPOOL_URL,
     }).$extends(withAccelerate())
-
-    const body = await c.req.json()
     try {
         const blog = await prisma.blog.create({
             data:{
@@ -51,15 +71,25 @@ blogRouter.post('/', async(c) => {
 })
   
 blogRouter.put('/', async(c) => {
+    const body = await c.req.json()
+    const { success } = updateBlogInput.safeParse(body)
+    if(!success){
+        c.status(411)
+        return c.json({
+            message:"Wrong Inputs"
+        })
+    }
+
     const prisma = new PrismaClient({
         datasourceUrl: c.env?.CONNECTIONPOOL_URL,
     }).$extends(withAccelerate())
 
-    const body = await c.req.json()
+    
     try {
         const blog = await prisma.blog.update({
             where:{
-                id:body.id
+                id:body.id,
+                authorId:c.get("userId")
             },
             data:{
                 title:body.title,
